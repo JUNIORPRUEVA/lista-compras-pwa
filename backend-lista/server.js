@@ -1,16 +1,24 @@
 // 1. Cargar las "herramientas" que instalamos
-require('dotenv').config(); // Carga las variables de entorno (nuestras contraseñas)
-const express = require('express'); // Carga Express para crear el servidor
-const cors = require('cors'); // Carga CORS para permitir la comunicación
-const { Pool } = require('pg'); // Carga la herramienta para hablar con PostgreSQL
+require('dotenv').config(); // Carga las variables de entorno para desarrollo local
+const express = require('express');
+const cors = require('cors');
+const { Pool } = require('pg');
+const path = require('path');
 
-// --- ¡NUEVA LÍNEA DE DEPURACIÓN! ---
-// Imprimimos la variable para ver qué está leyendo la aplicación
-console.log('La DATABASE_URL es:', process.env.DATABASE_URL);
+// --- VERIFICACIÓN CRUCIAL DE LA VARIABLE DE ENTORNO ---
+// Leemos la variable de conexión
+const DATABASE_URL = process.env.DATABASE_URL;
+
+// Si la variable no existe, la aplicación se detendrá y mostrará un error claro.
+if (!DATABASE_URL) {
+  console.error("### FATAL ERROR: La variable de entorno DATABASE_URL no está definida. ###");
+  console.error("Por favor, verifica la configuración del entorno en tu plataforma de despliegue (EasyPanel).");
+  process.exit(1); // Detiene la aplicación con un código de error.
+}
 
 // --- CONFIGURACIÓN DE LA BASE DE DATOS ---
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: DATABASE_URL, // Usamos la variable que ya verificamos
 });
 
 // --- FUNCIÓN PARA PREPARAR LA BASE DE DATOS ---
@@ -32,20 +40,17 @@ const prepareDatabase = async () => {
   }
 };
 
-// 2. Crear nuestra aplicación Express
+// --- INICIO DE LA APLICACIÓN EXPRESS ---
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// 3. Configurar "middlewares"
 app.use(cors());
 app.use(express.json());
 
-
 // --- RUTAS DE LA API ---
-// Primero definimos todas nuestras rutas de la API para que tengan prioridad.
 const apiRouter = express.Router();
 
-// GET /items - Obtener todos los items
+// GET /api/items
 apiRouter.get('/items', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM items ORDER BY created_at ASC');
@@ -56,7 +61,7 @@ apiRouter.get('/items', async (req, res) => {
   }
 });
 
-// POST /items - Crear un nuevo item
+// POST /api/items
 apiRouter.post('/items', async (req, res) => {
   try {
     const { text } = req.body;
@@ -67,10 +72,7 @@ apiRouter.post('/items', async (req, res) => {
     if (existingItem.rows.length > 0) {
       return res.status(409).send('El item ya existe en la lista');
     }
-    const result = await pool.query(
-      'INSERT INTO items (text) VALUES ($1) RETURNING *',
-      [text]
-    );
+    const result = await pool.query('INSERT INTO items (text) VALUES ($1) RETURNING *', [text]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -78,31 +80,20 @@ apiRouter.post('/items', async (req, res) => {
   }
 });
 
-// PUT /items/:id - Actualizar un item
+// PUT /api/items/:id
 apiRouter.put('/items/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { text, completed } = req.body;
-    const fields = [];
-    const values = [];
+    const fields = [], values = [];
     let queryCounter = 1;
-    if (text) {
-      fields.push(`text = $${queryCounter++}`);
-      values.push(text);
-    }
-    if (completed !== undefined) {
-      fields.push(`completed = $${queryCounter++}`);
-      values.push(completed);
-    }
-    if (fields.length === 0) {
-      return res.status(400).send('No se proporcionaron campos para actualizar.');
-    }
+    if (text) { fields.push(`text = $${queryCounter++}`); values.push(text); }
+    if (completed !== undefined) { fields.push(`completed = $${queryCounter++}`); values.push(completed); }
+    if (fields.length === 0) return res.status(400).send('No se proporcionaron campos para actualizar.');
     values.push(id);
     const updateQuery = `UPDATE items SET ${fields.join(', ')} WHERE id = $${queryCounter} RETURNING *`;
     const result = await pool.query(updateQuery, values);
-    if (result.rows.length === 0) {
-      return res.status(404).send('Item no encontrado');
-    }
+    if (result.rows.length === 0) return res.status(404).send('Item no encontrado');
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -110,14 +101,12 @@ apiRouter.put('/items/:id', async (req, res) => {
   }
 });
 
-// DELETE /items/:id - Borrar un item
+// DELETE /api/items/:id
 apiRouter.delete('/items/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('DELETE FROM items WHERE id = $1 RETURNING *', [id]);
-    if (result.rowCount === 0) {
-      return res.status(404).send('Item no encontrado');
-    }
+    if (result.rowCount === 0) return res.status(404).send('Item no encontrado');
     res.status(200).send(`Item con id ${id} eliminado`);
   } catch (err) {
     console.error(err);
@@ -125,16 +114,17 @@ apiRouter.delete('/items/:id', async (req, res) => {
   }
 });
 
-// Le decimos a nuestra app que use este router para todas las rutas que empiecen con /api
+// Usamos el router para todas las rutas que empiecen con /api
 app.use('/api', apiRouter);
 
-
 // --- SERVIR ARCHIVOS DEL FRONTEND ---
-// Esto va al final. Si la petición no es para la API, entonces busca en la carpeta 'public'.
+// Esta sección sirve el index.html y otros archivos de la carpeta 'public'.
 app.use(express.static('public'));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
-
-// 5. Iniciar el servidor
+// --- INICIAR EL SERVIDOR ---
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en el puerto ${PORT}`);
   prepareDatabase();
