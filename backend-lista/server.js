@@ -3,7 +3,6 @@ require('dotenv').config(); // Carga las variables de entorno (nuestras contrase
 const express = require('express'); // Carga Express para crear el servidor
 const cors = require('cors'); // Carga CORS para permitir la comunicación
 const { Pool } = require('pg'); // Carga la herramienta para hablar con PostgreSQL
-const path = require('path'); // Carga path para resolver rutas a archivos estáticos
 
 // --- CONFIGURACIÓN DE LA BASE DE DATOS ---
 const pool = new Pool({
@@ -37,21 +36,13 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Servir archivos estáticos de la carpeta 'public'
-// Si tu estructura coloca el frontend en un directorio hermano de este archivo,
-// ajusta la ruta '../public' según corresponda. Esto permitirá que el servidor
-// entregue index.html, manifest.json, sw.js, etc., sin una capa adicional.
-app.use(express.static(path.join(__dirname, '../public')));
 
-// 4. Ruta de prueba
-app.get('/', (req, res) => {
-  res.send('¡El backend de la lista de compras está funcionando!');
-});
+// --- RUTAS DE LA API ---
+// Primero definimos todas nuestras rutas de la API para que tengan prioridad.
+const apiRouter = express.Router();
 
-// --- RUTAS DE LA API (CRUD con nuevas funciones) ---
-
-// GET /api/items - Obtener todos los items
-app.get('/api/items', async (req, res) => {
+// GET /items - Obtener todos los items
+apiRouter.get('/items', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM items ORDER BY created_at ASC');
     res.json(result.rows);
@@ -61,8 +52,8 @@ app.get('/api/items', async (req, res) => {
   }
 });
 
-// POST /api/items - Crear un nuevo item (con validación de duplicados)
-app.post('/api/items', async (req, res) => {
+// POST /items - Crear un nuevo item
+apiRouter.post('/items', async (req, res) => {
   try {
     const { text } = req.body;
     if (!text) {
@@ -70,7 +61,7 @@ app.post('/api/items', async (req, res) => {
     }
     const existingItem = await pool.query('SELECT id FROM items WHERE LOWER(text) = LOWER($1)', [text]);
     if (existingItem.rows.length > 0) {
-      return res.status(409).send('El item ya existe en la lista'); // 409 Conflict
+      return res.status(409).send('El item ya existe en la lista');
     }
     const result = await pool.query(
       'INSERT INTO items (text) VALUES ($1) RETURNING *',
@@ -83,16 +74,14 @@ app.post('/api/items', async (req, res) => {
   }
 });
 
-// PUT /api/items/:id - Actualizar un item (texto o estado completado)
-app.put('/api/items/:id', async (req, res) => {
+// PUT /items/:id - Actualizar un item
+apiRouter.put('/items/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { text, completed } = req.body;
-
     const fields = [];
     const values = [];
     let queryCounter = 1;
-
     if (text) {
       fields.push(`text = $${queryCounter++}`);
       values.push(text);
@@ -101,16 +90,12 @@ app.put('/api/items/:id', async (req, res) => {
       fields.push(`completed = $${queryCounter++}`);
       values.push(completed);
     }
-
     if (fields.length === 0) {
       return res.status(400).send('No se proporcionaron campos para actualizar.');
     }
-
     values.push(id);
     const updateQuery = `UPDATE items SET ${fields.join(', ')} WHERE id = $${queryCounter} RETURNING *`;
-    
     const result = await pool.query(updateQuery, values);
-    
     if (result.rows.length === 0) {
       return res.status(404).send('Item no encontrado');
     }
@@ -121,12 +106,11 @@ app.put('/api/items/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/items/:id - Borrar un item
-app.delete('/api/items/:id', async (req, res) => {
+// DELETE /items/:id - Borrar un item
+apiRouter.delete('/items/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('DELETE FROM items WHERE id = $1 RETURNING *', [id]);
-    
     if (result.rowCount === 0) {
       return res.status(404).send('Item no encontrado');
     }
@@ -137,14 +121,18 @@ app.delete('/api/items/:id', async (req, res) => {
   }
 });
 
-// Ruta catch-all: servir index.html para cualquier ruta no API
-// Esto es útil para aplicaciones SPA/PWA que manejan el routing en el frontend.
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
-});
+// Le decimos a nuestra app que use este router para todas las rutas que empiecen con /api
+app.use('/api', apiRouter);
+
+
+// --- SERVIR ARCHIVOS DEL FRONTEND ---
+// Esto va al final. Si la petición no es para la API, entonces busca en la carpeta 'public'.
+app.use(express.static('public'));
+
 
 // 5. Iniciar el servidor
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en el puerto ${PORT}`);
   prepareDatabase();
 });
+
