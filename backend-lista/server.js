@@ -4,6 +4,10 @@ const express = require('express'); // Carga Express para crear el servidor
 const cors = require('cors'); // Carga CORS para permitir la comunicación
 const { Pool } = require('pg'); // Carga la herramienta para hablar con PostgreSQL
 
+// --- ¡NUEVA LÍNEA DE DEPURACIÓN! ---
+// Imprimimos la variable para ver qué está leyendo la aplicación
+console.log('La DATABASE_URL es:', process.env.DATABASE_URL);
+
 // --- CONFIGURACIÓN DE LA BASE DE DATOS ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
