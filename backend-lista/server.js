@@ -3,6 +3,7 @@ require('dotenv').config(); // Carga las variables de entorno (nuestras contrase
 const express = require('express'); // Carga Express para crear el servidor
 const cors = require('cors'); // Carga CORS para permitir la comunicación
 const { Pool } = require('pg'); // Carga la herramienta para hablar con PostgreSQL
+const path = require('path'); // Carga path para resolver rutas a archivos estáticos
 
 // --- CONFIGURACIÓN DE LA BASE DE DATOS ---
 const pool = new Pool({
@@ -36,6 +37,12 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Servir archivos estáticos de la carpeta 'public'
+// Si tu estructura coloca el frontend en un directorio hermano de este archivo,
+// ajusta la ruta '../public' según corresponda. Esto permitirá que el servidor
+// entregue index.html, manifest.json, sw.js, etc., sin una capa adicional.
+app.use(express.static(path.join(__dirname, '../public')));
+
 // 4. Ruta de prueba
 app.get('/', (req, res) => {
   res.send('¡El backend de la lista de compras está funcionando!');
@@ -61,13 +68,10 @@ app.post('/api/items', async (req, res) => {
     if (!text) {
       return res.status(400).send('El texto del item es requerido');
     }
-
-    // VERIFICACIÓN DE DUPLICADOS (insensible a mayúsculas/minúsculas)
     const existingItem = await pool.query('SELECT id FROM items WHERE LOWER(text) = LOWER($1)', [text]);
     if (existingItem.rows.length > 0) {
       return res.status(409).send('El item ya existe en la lista'); // 409 Conflict
     }
-
     const result = await pool.query(
       'INSERT INTO items (text) VALUES ($1) RETURNING *',
       [text]
@@ -85,7 +89,6 @@ app.put('/api/items/:id', async (req, res) => {
     const { id } = req.params;
     const { text, completed } = req.body;
 
-    // Construir la consulta dinámicamente
     const fields = [];
     const values = [];
     let queryCounter = 1;
@@ -134,9 +137,14 @@ app.delete('/api/items/:id', async (req, res) => {
   }
 });
 
+// Ruta catch-all: servir index.html para cualquier ruta no API
+// Esto es útil para aplicaciones SPA/PWA que manejan el routing en el frontend.
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
 // 5. Iniciar el servidor
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en el puerto ${PORT}`);
   prepareDatabase();
 });
-
